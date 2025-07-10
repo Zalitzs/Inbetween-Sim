@@ -112,29 +112,35 @@ class InBetweenEnv(gym.Env):
         self.pot = 0
         
         self.action_space = spaces.Discrete(21)                 # we let 0=pass 1 be 5% and so on to 20 being FULL POT
-        self.observation_space = spaces.MultiDiscrete([12,13])    # gap_bucket and pot_bucket
+        self.observation_space = spaces.MultiDiscrete([12,8])    # gap_bucket and pot_bucket
     def _gap_bucket(self,low,high):
         return (high - low - 1)
     
     def _pot_bucket(self):
-        return min(self.pot//5, 12)
+        # old shit            return min(self.pot//5, 12)
+        if self.pot == 0:
+            return 0
+        return min(int(math.log2(self.pot)), 7)
     
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, pl = 4):
         super().reset(seed=seed)
         if self.pot == 0:
-            self.pot += self.ante
+            self.pot += self.ante * pl
 
         c1, c2 = self.deck.draw(), self.deck.draw()
         self.low, self.high = sorted((c1,c2))
+        gap_bucket = max(self.high - self.low - 1, 0)
         
-        obs = (self._gap_bucket(self.low, self.high), self._pot_bucket())
+        obs = (gap_bucket, self._pot_bucket())
         info = {"low": self.low, "high": self.high}
         return obs, info
     
     def step(self, action):
-        bet_frac = action/20.0
-        bet = int(bet_frac * self.pot)
-        
+        if self.low == self.high:           # pair → forced pass
+            bet = 0
+        else:
+             bet = int((action / 20.0) * self.pot)
+
         reward = 0
         if bet > 0:
             target = self.deck.draw()
@@ -153,7 +159,7 @@ class InBetweenEnv(gym.Env):
         info = {}
         return obs, reward, terminated, False, info
     
-def train_q_agent(episodes: int = 400_000, alpha = 0.1, eps_start = 0.2, eps_end = 0.01, eps_decay = 2e5, print_every: int = 100_000):
+def train_q_agent(episodes: int = 400_000, alpha = 0.1, eps_start = 0.3, eps_end = 0.01, eps_decay = 2e7, print_every: int = 100_000):
     env = InBetweenEnv()
     Q = defaultdict(lambda: np.zeros(env.action_space.n, dtype = float))
     
@@ -175,31 +181,35 @@ def train_q_agent(episodes: int = 400_000, alpha = 0.1, eps_start = 0.2, eps_end
 def make_q_policy(Q):
     """Return a function f(low, high, pot, balance) → bet"""
     def q_policy(low, high, pot, bal):
-        gap_bucket = min(high - low - 1, 11)
-        pot_bucket = min(pot // 5, 12)
+        gap_bucket = max(high - low - 1, 0)    
+        pot_bucket = min(int(math.log2(max(pot, 1))), 7)
         state      = (gap_bucket, pot_bucket)
         action     = int(np.argmax(Q[state]))
         bet        = int((action / 20.0) * pot)
         return bet
     return q_policy
 
-def print_q_table(Q):
-    header = "gap\\pot | " + " ".join(f"{p:>3}" for p in range(13))
+def print_q_table(Q, n_gap_buckets: int = 12, n_pot_buckets: int = 8):
+    header = "gap\\pot | " + " ".join(f"{p:>3}" for p in range(n_pot_buckets))
     line   = "-" * len(header)
     print(header)
     print(line)
-    for gap in range(12):
+
+    for gap in range(n_gap_buckets):
         row = [f"{gap:>3}    |"]
-        for pot_bucket in range(13):
+        for pot_bucket in range(n_pot_buckets):
             state = (gap, pot_bucket)
             if state in Q:
                 best_a = int(np.argmax(Q[state]))
             else:
-                best_a = -1               # unvisited state
+                best_a = -1          # never visited in training
             row.append(f"{best_a:>3}")
         print(" ".join(row))
+
     print(line)
-    print("best_a meaning: 0=pass, 1=5 %, …, 20=100 %,  -1=never trained")
+    print(
+        "best_a: 0=pass, 1=5 %, …, 20=100 %;   -1 = state never visited"
+    )
 
     
 '''if __name__ == "__main__":
@@ -257,7 +267,7 @@ if __name__ == "__main__":
                       print_every= 100_000)
     q_policy = make_q_policy(Q)
 
-    print_q_table(Q)
+    print_q_table(Q, n_gap_buckets=12, n_pot_buckets=8)
     
     """play"""
     print("play")
