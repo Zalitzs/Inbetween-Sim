@@ -43,7 +43,7 @@ def cautious(low: int, high: int, pot: int, bal: int) -> int:
 
 def greedy(low: int, high: int, pot: int, bal: int) -> int:
     """ALL IN BABY"""
-    return pot if (high - low - 1) >= 2 else 0
+    return pot if (high - low - 1) >= 7 else 0
 
 
 def kelly_approx(low: int, high: int, pot: int, bal: int) -> int:

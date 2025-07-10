@@ -11,25 +11,32 @@ def train_q_agent(env,
                   eps_end: float = 0.01,
                   eps_decay: float = 2e6,
                   print_every: int = 100_000):
-
+    def key(obs):
+        return obs[:2]
+    
     Q = defaultdict(lambda: np.zeros(env.action_space.n, dtype=float))
 
     for ep in range(episodes):
-        state, _ = env.reset()
+        obs, _ = env.reset()
+        state  = key(obs)
+
+        if hasattr(env, "pending_reward") and env.pending_reward != 0:
+            Q[state][0] += alpha * (env.pending_reward - Q[state][0])
+            
         done = False
 
         while not done:
             agent_turn = not hasattr(env, "phase") or env.phase == "agent"
 
-            if agent_turn:
-                eps = eps_end + (eps_start - eps_end) * math.exp(-ep / eps_decay)
-                action = env.action_space.sample() if random.random() < eps \
-                         else int(np.argmax(Q[state]))
-            else:
-                action = 0          # dummy (ignored by env_twop)
+            eps = eps_end + (eps_start - eps_end) * math.exp(-ep / eps_decay)
+            action = (
+                env.action_space.sample() if agent_turn and random.random() < eps
+                else int(np.argmax(Q[state])) if agent_turn
+                else 0                       # dummy during opp turn
+            )
 
-
-            next_state, reward, done, _, _ = env.step(action)
+            next_obs, reward, done, _, _ = env.step(action)
+            next_state = key(next_obs)
 
             if agent_turn:
                 Q[state][action] += alpha * (reward - Q[state][action])
@@ -53,8 +60,8 @@ def make_q_policy(Q):
 
 # -------------------- main -----------------------------------
 if __name__ == "__main__":
-    env = InBetweenEnv()          # 1-player training
-    # env = InBetweenEnv2P()      # 2-player training
+    # env = InBetweenEnv()          # 1-player training
+    env = InBetweenEnv2P()      # 2-player training
     
     print("Training …")
     Q = train_q_agent(env, episodes=1_000_000)

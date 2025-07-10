@@ -1,19 +1,10 @@
-import math, random, numpy as np
+import math, random
+import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from core import Deck, greedy            # reuse existing code
+from core import Deck, greedy             # reuse existing code
 
 class InBetweenEnv2P(gym.Env):
-    """
-    One episode = BOTH players take a bet on the same hand.
-    Phase 'agent'  : RL agent acts.
-    Phase 'opp'    : fixed opponent acts (greedy policy).
-    Then draw third card, resolve both bets.
-    Observation = (gap_bucket, pot_bucket, turn_flag)
-        turn_flag = 0 if agent's turn, 1 if opponent's turn
-    Action space  = 0‥20 (same 5 % buckets, only used on agent turn).
-    Reward        = agent's chip delta (opp reward ignored).
-    """
     metadata = {"render_modes": []}
 
     def __init__(self, ante: int = 1, ante_players: int = 2):
