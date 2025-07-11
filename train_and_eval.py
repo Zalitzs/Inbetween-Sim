@@ -7,7 +7,7 @@ from collections import defaultdict
 def train_q_agent(env,
                   episodes: int = 400_000,
                   alpha: float = 0.1,
-                  eps_start: float = 0.2,
+                  eps_start: float = 0.5,
                   eps_end: float = 0.01,
                   eps_decay: float = 2e6,
                   print_every: int = 100_000):
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     env = InBetweenEnv2P()      # 2-player training
     
     print("Training …")
-    Q = train_q_agent(env, episodes=1_000_000)
+    Q = train_q_agent(env, episodes=100+_000_000)
 
     from core import print_q_table
     print_q_table(Q, n_gap_buckets=12, n_pot_buckets=8)

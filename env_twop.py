@@ -1,85 +1,88 @@
-import math, random
-import numpy as np
+import math
 import gymnasium as gym
 from gymnasium import spaces
-from core import Deck, greedy             # reuse existing code
+from core import Deck, greedy
 
 class InBetweenEnv2P(gym.Env):
-    metadata = {"render_modes": []}
-
-    def __init__(self, ante: int = 1, ante_players: int = 2):
+    metadata = {"render_modes":[]}
+    def __init__(self, ante: int = 1):
         super().__init__()
-        self.ante = ante
-        self.ante_players = ante_players    # both will ante
+        self.ante = max(1, ante)
         self.deck = Deck()
         self.pot  = 0
 
-        # 21 discrete bet choices
-        self.action_space = spaces.Discrete(21)
+        self.action_space      = spaces.Discrete(21)      # 0 … 20
+        self.observation_space = spaces.MultiDiscrete([12, 8, 2])   # gap_bucket and pot_bucket
+    
+    def _deal_pair(self):
+        c1, c2 = self.deck.draw(), self.deck.draw()
+        return sorted((c1, c2))
+    
+    def _gap_bucket(self, low, high):
+        return min(max(high - low - 1, 0), 11)
 
-        # gap 0-11, pot bucket 0-7, turn flag 0/1
-        self.observation_space = spaces.MultiDiscrete([12, 8, 2])
+    def _pot_bucket(self):
+        return min(int(math.log2(max(self.pot, 1))), 7)
 
-        self.phase = "agent"   # will be set in reset()
-
-    # helper buckets (same as your log version)
-    def _gap_bucket(self): return min(self.high - self.low - 1, 11)
-    def _pot_bucket(self): return min(int(math.log2(max(self.pot, 1))), 7)
-
-    # --------------------------------------------------
-    def reset(self, seed=None, options=None):
+    def _decode_bet(self, action):
+        return int((action / 20.0) * self.pot)
+    
+    def _settle(self, bet, low, high):
+        if bet == 0:
+            return 0
+        target = self.deck.draw()
+        if low < target < high:          # win
+            self.pot -= bet
+            return +bet
+        elif target in (low, high):      # post (double loss)
+            self.pot += 2 * bet
+            return -2 * bet
+        else:                            # outside loss
+            self.pot += bet
+            return -bet
+        
+    def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.pot = self.ante * self.ante_players   # both ante
-        if len(self.deck.cards) < 15:              # quick reshuffle
+
+        if self.pot == 0:
+            self.pot = self.ante * 2
+            self.pending_reward = -self.ante
+        else:
+            self.pending_reward = 0
+   # ante cost for agent
+
+        if len(self.deck.cards) < 20:
             self.deck.shuffle()
 
-        c1, c2 = self.deck.draw(), self.deck.draw()
-        self.low, self.high = sorted((c1, c2))
+        self.low, self.high = self._deal_pair()
         self.phase = "agent"
 
-        obs  = (self._gap_bucket(), self._pot_bucket(), 0)
+        obs = (self._gap_bucket(self.low, self.high),
+               self._pot_bucket(),
+               0)                          # turn_flag = 0 (agent)
         info = {}
         return obs, info
 
-    # --------------------------------------------------
     def step(self, action):
         if self.phase == "agent":
-            # ----- agent turn ---------------------------------
-            self.agent_bet = int((action / 20.0) * self.pot)
-            # opponent phase next
+
+            bet     = self._decode_bet(action)
+            reward  = self.pending_reward 
+            reward  += self._settle(bet, self.low, self.high)
+            self.pending_reward = 0        # clear ante cost
+
+            self.low, self.high = self._deal_pair()
             self.phase = "opp"
-            obs = (self._gap_bucket(), self._pot_bucket(), 1)
-            return obs, 0.0, False, False, {}        # no reward yet
 
-        else:
-            # ----- opponent turn ------------------------------
-            opp_action = self._opp_action()
-            self.opp_bet = int((opp_action / 20.0) * self.pot)
+            obs = (self._gap_bucket(self.low, self.high),
+                   self._pot_bucket(),
+                   1)                      # turn_flag = 1 (opp)
+            return obs, reward, False, False, {}
 
-            # ----- draw & resolve -----------------------------
-            target = self.deck.draw()
-            agent_reward = self._settle(self.agent_bet, target)
-            _            = self._settle(self.opp_bet,  target)  # ignored
+        opp_bet  = greedy(self.low, self.high, self.pot, bal=None)
+        self._settle(opp_bet, self.low, self.high)
 
-            terminated = True
-            obs = (0, 0, 0)          # dummy
-            return obs, agent_reward, terminated, False, {}
-
-    # greedy opponent uses your existing function
-    def _opp_action(self):
-        a = greedy(self.low, self.high, self.pot, bal=None)
-        return int(round(a / self.pot * 20)) if self.pot else 0
-
-    # settle a single bet, update pot, return reward for that bettor
-    def _settle(self, bet, target):
-        if bet == 0:
-            return 0
-        if self.low < target < self.high:        # win
-            self.pot -= bet
-            return +bet
-        elif target in (self.low, self.high):    # post
-            self.pot += 2 * bet
-            return -2 * bet
-        else:                                    # outside loss
-            self.pot += bet
-            return -bet
+        terminated = True
+        obs  = (0, 0, 0)     # dummy after terminal
+        info = {}
+        return obs, 0.0, terminated, False, info
